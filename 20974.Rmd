@@ -1,0 +1,265 @@
+---
+title: "Store 20974 "
+output: html_notebook
+---
+
+## Statistical Analysis for store 20974
+
+To begin with, splitting the dataset into training set and testing set is a must. By selecting the 8.5:1.5 ratio of splitting the original dataset, we can fit the model and test to see the accuracy for further prediction.
+
+```{r}
+train_20974 <- window(ts_20974, end = c(03,85), frequency = 7)
+test_20974 <- window(ts_20974, start = c(03,86))
+```
+
+### Holt-Winters Method
+```{r}
+## Initial Holt-Winters with exponential smoothing
+HW_20974 <- HoltWinters(ts_20974, beta = FALSE)
+HW_20974
+## Initial ETS model with automatic fitting
+ETS_20974 <- ets(ts_20974, model = 'ZZZ')
+ETS_20974
+```
+
+We are going to apply the model onto the training and testing set to do the forecasting.
+
+#### Forecasting on Training Set
+```{r}
+#Holt-Winters
+train_HW_20974 <- HoltWinters(train_20974, beta = FALSE)
+forecast_HW_20974  <- forecast(train_HW_20974, h = 14)
+#ets
+train_ets_20974 <- ets(train_20974, model = 'ZZZ')
+forecast_ets_20974  <- forecast(train_ets_20974, h = 14)
+
+plot(train_HW_20974, main="Holt-Winters vs. ETS (A,N,A) on training set", 
+     xlab="Time", 
+     ylab="Lettuce Demand", lty = 1, col = "black", frame.plot = FALSE)
+lines(fitted(train_ets_20974), col = "Blue", lty = 2)
+legend("bottom", legend=c("Actual","Holt-Winter", "ETS"), col=c("black", "red", "blue"), box.lty=0, lty=c(1,1,2), cex=0.8)
+```  
+***Figure 2.1:*** *This figure provides the fitted lines for holt-winter and ETS on store 20974.*  
+
+```{r}
+## Accuracy Comparison
+acc_ets_HW_20974 <- rbind(forecast::accuracy(forecast_HW_20974,
+                                       test_20974),
+                        forecast::accuracy(forecast_ets_20974,
+                                 test_20974))
+
+acc_ets_HW_20974_df <- data.frame(acc_ets_HW_20974, 
+                                row.names = c('HW_on_Train', 'HW_on_Test', 
+                                              'ETS_on_Train', 'ETS_on_Test'))
+
+acc_ets_HW_20974_df %>%  kable(caption = "Accuracy: Holt-Winter vs. ETS", 
+                                  align = 'c') %>%  
+  kable_styling() %>%
+  pack_rows("Holt-Winters", 1, 2) %>%
+  pack_rows("ETS", 3, 4) 
+```  
+***Table 2.1:*** *This table provides the comparison information for store 20974.*    
+
+From the table above, since the ETS model has the lowest RMSE value, we are going to select ETS model.
+
+#### Final ETS Model
+```{r}
+final_ets_20974 <- forecast(ETS_20974, h = 14)
+final_ets_20974_1 <- as.data.frame(forecast(ETS_20974, h = 14))
+final_ets_20974_df <- data.frame(final_ets_20974_1$`Point Forecast`, 
+                     row.names = c('16/06/15', '17/06/15',
+                                   '18/06/15', '19/06/15',
+                                   '20/06/15', '21/06/15',
+                                   '22/06/15','23/06/15',
+                                   '24/06/15', '25/06/15',
+                                   '26/06/15', '27/06/15',
+                                   '28/06/15', '29/06/15'))
+final_ets_20974_df %>%  
+  kable(caption = "14 Day ETS Forecast for Store 20974", align = 'c', col.names = 'Lettuce Demand') %>%  
+  kable_styling(full_width = F)
+
+autoplot(final_ets_20974, 
+         main = 'Final 14 Day ETS (A,Ad,A) Forecast', 
+         ylab = 'Lettuce Quantity', 
+         xlab = 'Time') + 
+  autolayer(fitted(final_ets_20974), 
+            series = 'Fitted', na.rm=TRUE) 
+```  
+***Table 2.2:*** *This table provides the ETS forecasting fitted value for store 20974.*  
+***Figure 2.2:*** *This figure provides the forecasting plot for store 20974.*  
+
+### ARIMA Forecast Models  
+
+I then develop the ARIMA model for store 20974 to forecast the demand of lettuce. The ARIMA model will then be compared with the final ETS model above to determine which is the most accuracy model and to do the further forecasting based on the accuracy of the model.   
+
+```{r}
+#ts diff
+diff_ts_20974 <- diff(ts_20974, differences = 1)
+autoplot(diff_ts_20974)  
+acf(diff_ts_20974, lag.max = 30) 
+pacf(diff_ts_20974, lag.max = 30) 
+
+adf.test(diff_ts_20974) 
+kpss.test(diff_ts_20974, null = 'Trend')
+pp.test(diff_ts_20974)
+ndiffs(diff_ts_20974)
+nsdiffs(diff_ts_20974)
+```  
+***Figure 2.3:*** *This figure provides the ACF and PACF information for store 20974*  
+
+As the p-value for Dickey-Fuller and Phillips-Perron Unit Root Test are smaller than 0.01, and the p-value for KPSS Test is larger than 0.01, the result above indicates stationary for the time series dataset. The ndiffs test return the value 0 and the nsdiffs test return the value of 0 after taking one difference, which indicates seasonal stationary.
+
+Then I applied one seasonal difference and plotting the ACF and PACF plot. Table below indicates the best model as ARIMA(1,0,1)(0,0,1)[7].
+
+```{r}
+auto.arima(ts_20974, d=1, trace = TRUE, ic = 'aic', approximation = FALSE)
+```
+
+#### ARIMA Functions Selected
+
+The best model is determined to be ARIMA(0,1,1)(1,0,1)[7], the second best is ARIMA(0,1,1)(1,0,0)[7]which indicates that we can put ARIMA(0,1,1)(p,0,q) with period 7 into the pool.  
+
+```{r}
+arima1_20974 <- Arima(ts_20974, order = c(0, 1 ,1), seasonal = list(order = c(1, 0, 0), period = 7))
+arima2_20974 <- Arima(ts_20974, order = c(0, 1 ,1), seasonal = list(order = c(1, 0, 1), period = 7))
+arima3_20974 <- Arima(ts_20974, order = c(0, 1 ,1), seasonal = list(order = c(0, 0, 1), period = 7))
+arima4_20974 <- Arima(ts_20974, order = c(0, 1 ,1), seasonal = list(order = c(1, 0, 2), period = 7))
+arima5_20974 <- Arima(ts_20974, order = c(0, 1 ,1), seasonal = list(order = c(0, 0, 2), period = 7))
+```
+
+The forecast function is used on each ARIMA model and used with a 14 period forecast.
+```{r}
+# 14 day ARIMA forecast
+forecast_arima1_20974 <- forecast(arima1_20974, h = 14)
+forecast_arima2_20974 <- forecast(arima2_20974, h = 14)
+forecast_arima3_20974 <- forecast(arima3_20974, h = 14)
+forecast_arima4_20974 <- forecast(arima4_20974, h = 14)
+forecast_arima5_20974 <- forecast(arima5_20974, h = 14)
+```
+
+```{r}
+accuracy_arima_20974 <- rbind(forecast::accuracy(forecast_arima1_20974), forecast::accuracy(forecast_arima2_20974), forecast::accuracy(forecast_arima3_20974),
+           forecast::accuracy(forecast_arima4_20974), forecast::accuracy(forecast_arima5_20974))
+
+accuracy_arima_20974_k <- data.frame(accuracy_arima_20974, 
+                                     row.names = c('ARIMA(0,1,1)(1,0,0)',
+                                                   'ARIMA(0,1,1)(1,0,1)',
+                                                   'ARIMA(0,1,1)(0,0,1)',
+                                                   'ARIMA(0,1,1)(1,0,2)',
+                                                   'ARIMA(0,1,1)(0,0,2)'))
+accuracy_arima_20974_k %>%  kable(caption = "Accuracy of ARIMA Model", align = 'c') %>%  kable_styling(full_width = F)
+```  
+***Table 2.3:*** *This table provides the model pool information for store 20974.*  
+
+Based on the table above, we can see that the model ARIMA(0,1,1)(1,0,2) has the lowest RMSE, then comes with ARIMA(0,1,1)(1,0,1).
+
+```{r}
+#Training arima 
+training_arima4_20974 <- arima(train_20974, 
+                                    order = c(0, 1 ,1), 
+                                    seasonal = list(order = c(1, 0, 2), 
+                                                    period = 7))
+training_arima2_20974 <- arima(train_20974, 
+                                    order = c(0, 1 ,1), 
+                                    seasonal = list(order = c(1, 0, 1), 
+                                                    period = 7))
+
+## Forecast using the training set
+forecast_arima2_20974 <- forecast(training_arima2_20974, h = 19)
+forecast_arima4_20974 <- forecast(training_arima4_20974, h = 19)
+```  
+
+```{r}
+accuracy_final_arima_20974 <- rbind(accuracy(forecast_arima2_20974,
+                                            test_20974),
+                              accuracy(forecast_arima4_20974,
+                                       test_20974))
+
+accuracy_final_arima_20974_k <- data.frame(accuracy_final_arima_20974, 
+                                          row.names = c('Train_2', 'Test_2',
+                                                        'Train_4', 'Test_4'))
+
+accuracy_final_arima_20974_k %>%  kable(caption = "Accuracy of ARIMA Models", align = 'c') %>%  kable_styling(full_width = F) %>%
+  pack_rows("ARIMA(0,1,1)(1,0,1)", 1, 2) %>%
+  pack_rows("ARIMA(0,1,1)(1,0,2)", 3, 4)
+```  
+***Table 2.4:*** *This table provides the model comparison information for store 20974.* 
+
+#### Final ARIMA Model
+```{r}
+## Best model plotted
+best_arima_20974 <- arima(ts_20974, 
+                               order = c(0, 1 ,1), 
+                               seasonal = list(order = c(1, 0, 2), 
+                                               period = 7))
+forecast_best_arima_20974 <- forecast(best_arima_20974, h = 14)
+forecast_best_arima_20974_1 <- as.data.frame(forecast_best_arima_20974)
+
+forecast_best_arima_20974_df <- data.frame(forecast_best_arima_20974_1$`Point Forecast`, 
+                                               row.names = c('16/06/15', '17/06/15', '18/06/15',
+                                                             '19/06/15', '20/06/15', '21/06/15',
+                                                             '22/06/15', '23/06/15', '24/06/15',
+                                                             '25/06/15', '26/06/15', '27/06/15',
+                                                             '28/06/15', '29/06/15'))
+forecast_best_arima_20974_df %>%  kable(caption = "Final 14 Day ARIMA Forecast", align = 'c',  col.names = 'Lettuce Demand') %>%  kable_styling(full_width = F)
+
+autoplot(forecast_best_arima_20974, 
+         main = 'Final 14 Day ARIMA(0, 1, 1)(1, 0, 2)[7] Forecast', 
+         ylab = 'Lettuce Quantity', xlab = 'Time') + 
+  autolayer(fitted(forecast_best_arima_20974), series = 'Fitted', na.rm=TRUE) +
+  scale_x_continuous(breaks = seq(0, 22, by = 2))
+```  
+***Table 2.5:*** *This table provides the final prediction value of time series for store 20974.* 
+***Figure 2.4:*** *This table provides the final prediction plot for store 20974.* 
+
+```{r}
+checkresiduals(forecast_best_arima_20974)
+```  
+***Figure 2.5:*** *This figure provides the residual and test for store 20974.*   
+
+The four tests above indicate that the ARIMA(0, 1, 1)(1, 0, 2)[7] model is a sufficient predictive model.  
+
+### Final Forecast for Resturant 20974: 
+
+The best two selected model will be compared in this section.  
+
+```{r}
+## Checking which model based on RMSE
+accuracy_final_model_all_20974 <- rbind(forecast::accuracy(forecast_ets_20974, test_20974), 
+                                       forecast::accuracy(forecast_arima4_20974, test_20974))
+accuracy_final_model_all_20974_df <- data.frame(accuracy_final_model_all_20974, 
+                                               row.names = c('Train_ets', 'Test_ets', 'Train_ts', 'Test_ts'))
+
+accuracy_final_model_all_20974_df %>%  kable(caption = "Accuracy of Best ETS and ARIMA", align = 'c') %>%  
+  kable_styling(full_width = F) %>%
+  pack_rows("ETS", 1, 2) %>%
+  pack_rows("ARIMA(0,1,1)(1,0,2)", 3, 4) 
+```  
+***Table 2.6:*** *This Table provides the methods comparison information for store 20974.*   
+
+ETS model appears to fit the data better than the time series model and similarly has better forecasting power.
+
+```{r}
+# Best model
+final_20974 <- forecast(final_ets_20974, h = 14)
+
+autoplot(final_20974, 
+         main = 'Forecasted Lettuce Demand of Restaurant 20974', 
+         ylab = 'Lettuce Quantity', 
+         xlab = 'Time') + 
+  autolayer(fitted(final_ets_20974), series = 'Fitted', na.rm=TRUE)
+
+#Write to csv
+write.csv(final_20974, 'final_20974.csv')
+
+## Final Forecast (Table)
+final_20974_1 <- as.data.frame(forecast(final_ets_20974, h = 14))
+final_store_20974_df <- data.frame(final_20974_1$`Point Forecast`, 
+                                 row.names = c('16/06/15', '17/06/15', '18/06/15', '19/06/15',
+                                               '20/06/15', '21/06/15', '22/06/15', '23/06/15',
+                                               '24/06/15', '25/06/15', '26/06/15', '27/06/15',
+                                               '28/06/15', '29/06/15'))
+final_store_20974_df %>%  kable(caption = "Final 14 Day ARIMA Forecast", align = 'c', col.names = 'Lettuce Demand') %>%  kable_styling(full_width = F)
+```
+***Figure 2.6:*** *This figure provides the final forecasting plot for store 20974.*   
+***Table 2.7:*** *This table provides the final forecasting value for store 20974.*   
